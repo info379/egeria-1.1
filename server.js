@@ -56,7 +56,7 @@ app.post('/api/egeria', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'gpt-5',
-        temperature: 0.7,
+        temperature: 1,
         messages: buildMessages(prompt, history),
       }),
     });
