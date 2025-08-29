@@ -72,7 +72,7 @@ async function pipeOpenAIStream(messages, res) {
     },
     body: JSON.stringify({
       model: 'gpt-5',
-      temperature: 0.7,
+      temperature: 1,
       stream: true,
       messages
     })
