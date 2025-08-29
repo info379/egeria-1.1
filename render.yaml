@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: egeria
+    env: node
+    plan: starter
+    region: frankfurt
+    buildCommand: "npm ci"
+    startCommand: "node server.js"
+    autoDeploy: true
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: NODE_VERSION
+        value: "20"
