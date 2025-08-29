@@ -51,11 +51,11 @@ async function loadSystemPrompt() {
   SYSTEM_PROMPT = await fs.readFile(promptPath, 'utf-8');
   console.log('✅ System prompt caricato da file.');
 }
-function buildMessages(userPrompt, history = []) {
+function buildMessages(prompt, history = []) {
   return [
     { role: 'system', content: SYSTEM_PROMPT },
     ...history.map(m => ({ role: m.role, content: m.content })),
-    { role: 'user', content: userPrompt }
+    { role: 'user', content: prompt }
   ];
 }
 
@@ -76,7 +76,7 @@ app.post('/api/egeria', async (req, res) => {
       body: JSON.stringify({
         model: 'gpt-5',
         temperature: 0.7,
-        messages: buildMessages(prompt, history)
+        messages: buildMessages(prompt, history) // ✅ qui era "promp"
       })
     });
 
@@ -114,9 +114,7 @@ app.post('/api/egeria/stream', async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no'); // riduce buffering su proxy tipo nginx
     res.flushHeaders?.(); // invia subito gli header se disponibile
-
-    // Sblocca lo stream su alcuni proxy inviando un primo pacchetto
-    res.write(':\n\n'); // comment/heartbeat SSE
+    res.write(':\n\n'); // primo pacchetto per sbloccare alcuni proxy
 
     // Heartbeat periodico per tenere viva la connessione
     const keepAlive = setInterval(() => {
@@ -133,4 +131,67 @@ app.post('/api/egeria/stream', async (req, res) => {
         model: 'gpt-5',
         temperature: 0.7,
         stream: true,
-        messages: buildMessages(promp
+        messages: buildMessages(prompt, history) // ✅ qui era "promp"
+      })
+    });
+
+    if (!upstream.ok || !upstream.body) {
+      const errText = await upstream.text();
+      console.error('OpenAI stream error:', errText);
+      res.write(`data: ${JSON.stringify({ error: 'Errore OpenAI', details: errText })}\n\n`);
+      clearInterval(keepAlive);
+      return res.end();
+    }
+
+    const reader  = upstream.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+
+      // L'API OpenAI manda righe "data: {...}"
+      for (const line of chunk.split('\n')) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+
+        const payload = trimmed.replace(/^data:\s*/, '');
+        if (payload === '[DONE]') {
+          res.write('data: {"done": true}\n\n');
+          clearInterval(keepAlive);
+          res.end();
+          return;
+        }
+        try {
+          const json  = JSON.parse(payload);
+          const delta = json?.choices?.[0]?.delta?.content ?? '';
+          if (delta) {
+            // Invia solo il pezzo di testo incrementale
+            res.write(`data: ${JSON.stringify({ delta })}\n\n`);
+          }
+        } catch {
+          // keepalive/linee non-JSON: ignora
+        }
+      }
+    }
+
+    res.write('data: {"done": true}\n\n');
+    clearInterval(keepAlive);
+    res.end();
+  } catch (err) {
+    console.error(err);
+    try {
+      res.write(`data: ${JSON.stringify({ error: 'Errore di streaming' })}\n\n`);
+    } catch {}
+    res.end();
+  }
+});
+
+// -------------------- Start --------------------
+await loadSystemPrompt();
+const port = process.env.PORT || 3001;
+app.listen(port, () => {
+  console.log(`✅ Backend Egeria in ascolto sulla porta ${port}`);
+});
