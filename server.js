@@ -1,4 +1,4 @@
-// server.js — API only, CORS con domini hard-coded
+// server.js — API only, CORS hard-coded, streaming migliorato
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
@@ -14,18 +14,18 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '1mb' }));
 
-// -------------------- CORS con domini scritti nel codice --------------------
+// -------------------- CORS: domini consentiti SCRITTI nel codice --------------------
 const corsOptions = {
   origin(origin, cb) {
     // Consenti richieste server-to-server / Postman (senza header Origin)
     if (!origin) return cb(null, true);
 
-    // ✅ Scrivi qui direttamente le origini consentite
+    // ✅ Metti qui i tuoi domini frontend
     if (
       origin === 'https://upmanage.it' ||
       origin === 'https://www.upmanage.it' ||
-      origin === 'http://localhost:3000' ||   // opzionale: test locale
-      origin === 'http://localhost:5173'      // opzionale: test locale (Vite)
+      origin === 'http://localhost:3000' || // opzionale: test locale
+      origin === 'http://localhost:5173'    // opzionale: test locale (Vite)
     ) {
       return cb(null, true);
     }
@@ -33,13 +33,12 @@ const corsOptions = {
   },
   methods: ['POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: false,
+  credentials: false
 };
-
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions)); // preflight
 
-// -------------------- OpenAI + Prompt --------------------
+// -------------------- OpenAI + System Prompt --------------------
 const apiKey = process.env.OPENAI_API_KEY;
 if (!apiKey) {
   console.error('❌ Mancante OPENAI_API_KEY. Impostala nelle Environment Variables (Render).');
@@ -52,12 +51,11 @@ async function loadSystemPrompt() {
   SYSTEM_PROMPT = await fs.readFile(promptPath, 'utf-8');
   console.log('✅ System prompt caricato da file.');
 }
-
 function buildMessages(userPrompt, history = []) {
   return [
     { role: 'system', content: SYSTEM_PROMPT },
     ...history.map(m => ({ role: m.role, content: m.content })),
-    { role: 'user', content: userPrompt },
+    { role: 'user', content: userPrompt }
   ];
 }
 
@@ -73,13 +71,13 @@ app.post('/api/egeria', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
         model: 'gpt-5',
         temperature: 0.7,
-        messages: buildMessages(prompt, history),
-      }),
+        messages: buildMessages(prompt, history)
+      })
     });
 
     if (!upstream.ok) {
@@ -97,87 +95,42 @@ app.post('/api/egeria', async (req, res) => {
   }
 });
 
-// -------------------- Endpoint STREAM (testo progressivo) --------------------
+// -------------------- Endpoint STREAM (SSE) --------------------
 app.post('/api/egeria/stream', async (req, res) => {
   try {
     const { prompt, history } = req.body || {};
     if (!prompt || typeof prompt !== 'string') {
       res.writeHead(400, {
         'Content-Type': 'text/plain; charset=utf-8',
-        'Transfer-Encoding': 'chunked',
+        'Transfer-Encoding': 'chunked'
       });
       res.write('Prompt mancante o non valido.');
       return res.end();
     }
 
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      'Connection': 'keep-alive',
-    });
+    // Intestazioni per SSE + anti-buffering
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no'); // riduce buffering su proxy tipo nginx
+    res.flushHeaders?.(); // invia subito gli header se disponibile
+
+    // Sblocca lo stream su alcuni proxy inviando un primo pacchetto
+    res.write(':\n\n'); // comment/heartbeat SSE
+
+    // Heartbeat periodico per tenere viva la connessione
+    const keepAlive = setInterval(() => {
+      try { res.write(':\n\n'); } catch {}
+    }, 15000);
 
     const upstream = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${apiKey}`
       },
       body: JSON.stringify({
         model: 'gpt-5',
         temperature: 0.7,
         stream: true,
-        messages: buildMessages(prompt, history),
-      }),
-    });
-
-    if (!upstream.ok || !upstream.body) {
-      const errText = await upstream.text();
-      console.error('OpenAI stream error:', errText);
-      res.write(`data: ${JSON.stringify({ error: 'Errore OpenAI', details: errText })}\n\n`);
-      return res.end();
-    }
-
-    const reader  = upstream.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-
-        const payload = trimmed.replace(/^data:\s*/, '');
-        if (payload === '[DONE]') {
-          res.write('data: {"done": true}\n\n');
-          res.end();
-          return;
-        }
-        try {
-          const json  = JSON.parse(payload);
-          const delta = json?.choices?.[0]?.delta?.content ?? '';
-          if (delta) res.write(`data: ${JSON.stringify({ delta })}\n\n`);
-        } catch {
-          // heartbeat/keepalive: ignora
-        }
-      }
-    }
-
-    res.write('data: {"done": true}\n\n');
-    res.end();
-  } catch (err) {
-    console.error(err);
-    try { res.write(`data: ${JSON.stringify({ error: 'Errore di streaming' })}\n\n`); } catch {}
-    res.end();
-  }
-});
-
-// -------------------- Start --------------------
-await loadSystemPrompt();
-
-const port = process.env.PORT || 3001;
-app.listen(port, () => {
-  console.log(`✅ Backend Egeria in ascolto sulla porta ${port}`);
-});
+        messages: buildMessages(promp
