@@ -56,7 +56,7 @@ app.post('/api/egeria', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'gpt-5',
-        temperature: 1,
+        temperature: 0.7,
         messages: buildMessages(prompt, history),
       }),
     });
@@ -102,7 +102,7 @@ app.post('/api/egeria/stream', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'gpt-5',
-        temperature: 0.7,
+        temperature: 1,
         stream: true,
         messages: buildMessages(prompt, history),
       }),
