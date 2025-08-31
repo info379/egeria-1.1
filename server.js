@@ -21,7 +21,6 @@ const corsOptions = {
       origin === 'https://upmanage.it' ||
       origin === 'https://www.upmanage.it' ||
       origin === 'http://localhost:3000' || // opzionale test
-      origin === 'http://localhost:5173'    // opzionale test (Vite)
     ) return cb(null, true);
     return cb(new Error(`Origin non autorizzata: ${origin}`), false);
   },
@@ -72,7 +71,6 @@ async function pipeOpenAIStream(messages, res) {
     },
     body: JSON.stringify({
       model: 'gpt-5',
-      temperature: 1,
       stream: true,
       messages
     })
@@ -143,7 +141,6 @@ app.post('/api/egeria', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'gpt-5',
-        temperature: 0.7,
         messages: buildMessages(prompt, history)
       })
     });
