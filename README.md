@@ -13,7 +13,7 @@ Progetto minimale per far girare Egeria su Render collegato a GitHub.
 ## 2) Come usarlo
 1. Carica questi file su un nuovo repo GitHub.
 2. Su Render: New → Web Service → collega il repo.
-3. Build Command: `npm ci` — Start Command: `node server.js`.
+3. Build Command: `npm install` — Start Command: `node server.js`.
 4. Aggiungi l'env `OPENAI_API_KEY` nel pannello di Render.
 5. Apri l'URL pubblico del servizio: vedrai la chat.
 
