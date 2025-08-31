@@ -21,6 +21,7 @@ const corsOptions = {
       origin === 'https://upmanage.it' ||
       origin === 'https://www.upmanage.it' ||
       origin === 'http://localhost:3000' || // opzionale test
+      origin === 'http://localhost:5173'    // opzionale test (Vite)
     ) return cb(null, true);
     return cb(new Error(`Origin non autorizzata: ${origin}`), false);
   },
